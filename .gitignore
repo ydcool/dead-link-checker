@@ -1,0 +1,5 @@
+.DS_Store
+.Trash
+.idea
+*.exe
+dead-link-checker
