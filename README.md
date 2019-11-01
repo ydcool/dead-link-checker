@@ -35,5 +35,5 @@ $ ./dead-link-checker.exe -b master -l github.com/ydcool/QrModule -au ydcool -ak
 2019/11/01 00:32:17 ❌  https://travis-ci.org/Ydcool/QrModule.svg?branch=master
 2019/11/01 00:32:36 ❌  http://developer.android.com/reference/android/graphics/PorterDuff.Mode.html
 2019/11/01 00:32:36 🏁 All done! broken links in total: 3
-2019/11/01 00:32:36 💌 All broken links saved toerrors.txt
+2019/11/01 00:32:36 💌 All broken links saved to errors.txt
 ```

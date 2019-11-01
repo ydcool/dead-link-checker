@@ -18,6 +18,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 )
 
 const HttpReg = `((http|ftp|https)://)(([a-zA-Z0-9\._-]+\.[a-zA-Z]{2,6})|([0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}))(:[0-9]{1,4})*(/[a-zA-Z0-9\&%_\./-~-]*)?`
@@ -55,9 +56,10 @@ Usage:
 
 func main() {
 	var (
-		err       error
-		wg        sync.WaitGroup
-		errorsCol = make([]string, 0)
+		err          error
+		errorsCol    = make([]string, 0)
+		totalFiles   int
+		filesChecked int
 	)
 	flag.Parse()
 	if help || len(os.Args) == 1 {
@@ -89,7 +91,8 @@ func main() {
 		log.Print("❌  ", resultData.Message)
 		return
 	}
-	log.Printf("🔗 %d files total in this repo...\n", len(resultData.Tree))
+	totalFiles = len(resultData.Tree)
+	log.Printf("🔗 %d files total in this repo...\n", totalFiles)
 
 	reg, err := regexp.Compile(HttpReg)
 	if err != nil {
@@ -111,28 +114,36 @@ func main() {
 			}
 			if blob.Encoding == "base64" {
 				log.Printf("🕑 start scan %s...\n", t.Path)
+				wg := sync.WaitGroup{}
 				contentBytes, err := base64.StdEncoding.DecodeString(blob.Content)
 				if err != nil {
 					log.Printf("failed to decode content of %s : %v", t.Path, err)
 					continue
 				}
 				links := reg.FindAllString(string(contentBytes), -1)
+				headAppended := false
 				for _, l := range links {
 					wg.Add(1)
 					go func(link string) {
 						defer wg.Done()
 						if !DoPing(link) {
 							log.Printf("❌  %s\n", link)
+							if !headAppended {
+								errorsCol = append(errorsCol, "## "+t.Path)
+								headAppended = true
+							}
 							errorsCol = append(errorsCol, link)
 						} else if verbose {
 							log.Printf("✔ %s\n", link)
 						}
 					}(l)
 				}
+				wg.Wait()
+				log.Printf("🔲 [%.2f%%] done for %s", float32(filesChecked)/float32(totalFiles)*100, t.Path)
 			}
 		}
+		filesChecked++
 	}
-	wg.Wait()
 	log.Println("🏁 All done! broken links in total:", len(errorsCol))
 
 	if output != "" {
@@ -149,16 +160,20 @@ func getHttpClient(p string) *http.Client {
 		uRL := url.URL{}
 		urlProxy, _ := uRL.Parse(p)
 		c := http.Client{
+			Timeout: 10 * time.Second,
 			Transport: &http.Transport{
 				Proxy: http.ProxyURL(urlProxy),
 			},
 		}
 		return &c
 	}
-	return http.DefaultClient
+	return &http.Client{
+		Timeout: 10 * time.Second,
+	}
 }
 
 func addAccessHeader(au, ak string, req *http.Request) {
+	req.Header.Set("Connection", "close")
 	if au != "" && ak != "" {
 		req.Header.Add("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(au+":"+ak)))
 	}
