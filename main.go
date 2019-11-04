@@ -147,7 +147,7 @@ func main() {
 	log.Println("🏁 All done! broken links in total:", len(errorsCol))
 
 	if output != "" {
-		err = ioutil.WriteFile(output, []byte(strings.Join(errorsCol, "\n")), os.FileMode(os.O_CREATE|os.O_WRONLY))
+		err = ioutil.WriteFile(output, []byte(strings.Join(errorsCol, "\r\n")), os.FileMode(os.O_CREATE|os.O_WRONLY))
 		if err != nil {
 			log.Fatal(err)
 		}
