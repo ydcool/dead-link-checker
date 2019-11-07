@@ -32,6 +32,7 @@ var (
 	accessToken string
 	output      string
 	verbose     bool
+	timeout     int
 )
 
 func init() {
@@ -46,6 +47,7 @@ Usage:
 	flag.StringVar(&accessUser, "au", "", `access username for higher requests rate`)
 	flag.StringVar(&accessToken, "ak", "", `access token for higher requests rate`)
 	flag.StringVar(&output, "o", "", `write result to file`)
+	flag.IntVar(&timeout, "timeout", 10, "request timeout in seconds, default 10s")
 	flag.BoolVar(&verbose, "v", false, "print all checked links, default false to show broken only")
 	flag.BoolVar(&help, "h", false, "help")
 	flag.Usage = func() {
@@ -58,7 +60,6 @@ func main() {
 	var (
 		err          error
 		errorsCol    = make([]string, 0)
-		totalFiles   int
 		filesChecked int
 	)
 	flag.Parse()
@@ -91,67 +92,72 @@ func main() {
 		log.Print("❌  ", resultData.Message)
 		return
 	}
-	totalFiles = len(resultData.Tree)
-	log.Printf("🔗 %d files total in this repo...\n", totalFiles)
+	log.Printf("🔗 %d files total in this repo...\n", len(resultData.Tree))
 
 	reg, err := regexp.Compile(HttpReg)
 	if err != nil {
 		log.Fatal(err)
 	}
 
+	allMarkdown := make([]pkg.Tree, 0)
 	for _, t := range resultData.Tree {
 		if t.Type == "blob" && strings.HasSuffix(t.Path, ".md") {
-			rData, err := DoRequest(t.Url)
+			allMarkdown = append(allMarkdown, t)
+		}
+	}
+	log.Printf("🔰 %d md total in this repo...\n", len(allMarkdown))
+
+	for _, t := range allMarkdown {
+		rData, err := DoRequest(t.Url)
+		if err != nil {
+			log.Printf("failed read %s: %v", t.Path, err)
+			continue
+		}
+		var blob pkg.Blobs
+		err = json.Unmarshal([]byte(rData), &blob)
+		if err != nil {
+			log.Printf("faild parse blob %s: %v", t.Path, err)
+			continue
+		}
+		if blob.Encoding == "base64" {
+			log.Printf("🕑 start scan %s...\n", t.Path)
+			wg := sync.WaitGroup{}
+			contentBytes, err := base64.StdEncoding.DecodeString(blob.Content)
 			if err != nil {
-				log.Printf("failed read %s: %v", t.Path, err)
+				log.Printf("failed to decode content of %s : %v", t.Path, err)
 				continue
 			}
-			var blob pkg.Blobs
-			err = json.Unmarshal([]byte(rData), &blob)
-			if err != nil {
-				log.Printf("faild parse blob %s: %v", t.Path, err)
-				continue
-			}
-			if blob.Encoding == "base64" {
-				log.Printf("🕑 start scan %s...\n", t.Path)
-				wg := sync.WaitGroup{}
-				contentBytes, err := base64.StdEncoding.DecodeString(blob.Content)
-				if err != nil {
-					log.Printf("failed to decode content of %s : %v", t.Path, err)
-					continue
-				}
-				links := reg.FindAllString(string(contentBytes), -1)
-				headAppended := false
-				for _, l := range links {
-					wg.Add(1)
-					go func(link string) {
-						defer wg.Done()
-						if !DoPing(link) {
-							log.Printf("❌  %s\n", link)
-							if !headAppended {
-								errorsCol = append(errorsCol, "## "+t.Path)
-								headAppended = true
-							}
-							errorsCol = append(errorsCol, link)
-						} else if verbose {
-							log.Printf("✔ %s\n", link)
+			links := reg.FindAllString(string(contentBytes), -1)
+			headAppended := false
+			for _, l := range links {
+				wg.Add(1)
+				go func(link string) {
+					defer wg.Done()
+					if s, e := DoPing(link); e != nil || s != http.StatusOK {
+						log.Printf("❌  [%d] %s\n", s, link)
+						if !headAppended {
+							errorsCol = append(errorsCol, "## "+t.Path)
+							headAppended = true
 						}
-					}(l)
-				}
-				wg.Wait()
-				log.Printf("🔲 [%.2f%%] done for %s", float32(filesChecked)/float32(totalFiles)*100, t.Path)
+						errorsCol = append(errorsCol, fmt.Sprintf("[%d] %s", s, link))
+					} else if verbose {
+						log.Printf("✔ [%d] %s\n", s, link)
+					}
+				}(l)
 			}
+			wg.Wait()
+			log.Printf("🔲 [%.2f%%] done for %s", float32(filesChecked)/float32(len(allMarkdown))*100, t.Path)
+
 		}
 		filesChecked++
 	}
-	log.Println("🏁 All done! broken links in total:", len(errorsCol))
 
 	if output != "" {
 		err = ioutil.WriteFile(output, []byte(strings.Join(errorsCol, "\r\n")), os.FileMode(os.O_CREATE|os.O_WRONLY))
 		if err != nil {
 			log.Fatal(err)
 		}
-		log.Print("💌 All broken links saved to ", output)
+		log.Print("🏁 All broken links saved to ", output)
 	}
 }
 
@@ -160,7 +166,7 @@ func getHttpClient(p string) *http.Client {
 		uRL := url.URL{}
 		urlProxy, _ := uRL.Parse(p)
 		c := http.Client{
-			Timeout: 10 * time.Second,
+			Timeout: time.Second * time.Duration(timeout),
 			Transport: &http.Transport{
 				Proxy: http.ProxyURL(urlProxy),
 			},
@@ -168,14 +174,7 @@ func getHttpClient(p string) *http.Client {
 		return &c
 	}
 	return &http.Client{
-		Timeout: 10 * time.Second,
-	}
-}
-
-func addAccessHeader(au, ak string, req *http.Request) {
-	req.Header.Set("Connection", "close")
-	if au != "" && ak != "" {
-		req.Header.Add("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(au+":"+ak)))
+		Timeout: time.Second * time.Duration(timeout),
 	}
 }
 
@@ -184,7 +183,10 @@ func DoRequest(link string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	addAccessHeader(accessUser, accessToken, req)
+	req.Header.Set("Connection", "close")
+	if accessToken != "" && accessUser != "" {
+		req.Header.Add("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(accessUser+":"+accessToken)))
+	}
 	var resp *http.Response
 	defer func() {
 		if resp != nil {
@@ -205,16 +207,15 @@ func DoRequest(link string) (string, error) {
 	return string(data), nil
 }
 
-func DoPing(link string) bool {
-	req, err := http.NewRequest(http.MethodHead, link, nil)
+func DoPing(link string) (int, error) {
+	req, err := http.NewRequest(http.MethodGet, link, nil)
 	if err != nil {
-		return false
+		return 0, err
 	}
-	addAccessHeader(accessUser, accessToken, req)
 	var resp *http.Response
 	resp, err = getHttpClient(proxy).Do(req)
 	if err != nil {
-		return false
+		return 0, err
 	}
-	return resp.StatusCode == http.StatusOK
+	return resp.StatusCode, nil
 }
