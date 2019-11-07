@@ -18,10 +18,13 @@ Usage:
   -l string
         the user name of target repo path to check , for example 'github.com/docker/docker-ce'
   -o string
-        write result to file   
-  -v    print all checked links, default false to show broken only
+        write result to file
   -p string
         http/https proxy
+  -timeout int
+        request timeout in seconds, default 10s (default 10)
+  -v    print all checked links, default false to show broken only
+
 ```
 
 示例：
