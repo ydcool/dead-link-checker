@@ -1,5 +1,10 @@
 /**
 ./dead-link-checker.exe -v -b master -l github.com/ydcool/QrModule -au ydcool -ak c75c7ff10223322029b467945bc3bb07faaac0d0 -p http://127.0.0.1:3398 -o brokenlinks.txt
+
+TODO
+ 链接缓存，去重
+ 0
+ 请求降频
 */
 
 package main
@@ -17,7 +22,6 @@ import (
 	"os"
 	"regexp"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -57,6 +61,12 @@ Usage:
 }
 
 func main() {
+	//log.Print("start..")
+	////i, e := DoPing("https://dl.k8s.io/v1.10.13/kubernetes-client-darwin-386.tar.gz")
+	//i, e := DoPing("https://api.bintray.com/packages/ydcool/maven/QrModule/images/download.svg")
+	//log.Print(i, e)
+	//return
+
 	var (
 		err          error
 		errorsCol    = make([]string, 0)
@@ -72,16 +82,20 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	repoLinks := linkReg.FindAllString(repo, 1)
+	repoLinks := linkReg.FindAllString(repo, -1)
 	if len(repoLinks) == 0 {
 		log.Fatal("invalid repo url")
 	}
 	rs := strings.Split(repoLinks[0], "/")
 	log.Println("🚀 start scan ...")
 
-	rData, err := DoRequest(fmt.Sprintf("https://api.github.com/repos/%s/%s/git/trees/%s?recursive=1", rs[1], rs[2], branch))
+	api := fmt.Sprintf("https://api.github.com/repos/%s/%s/git/trees/%s?recursive=1", rs[1], rs[2], branch)
+	if verbose {
+		log.Println("🐞 start request api: ", api)
+	}
+	rData, err := DoRequest(api)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("failed request api %s: %v", api, err)
 	}
 	var resultData pkg.Trees
 	err = json.Unmarshal([]byte(rData), &resultData)
@@ -121,7 +135,7 @@ func main() {
 		}
 		if blob.Encoding == "base64" {
 			log.Printf("🕑 start scan %s...\n", t.Path)
-			wg := sync.WaitGroup{}
+			//wg := sync.WaitGroup{}
 			contentBytes, err := base64.StdEncoding.DecodeString(blob.Content)
 			if err != nil {
 				log.Printf("failed to decode content of %s : %v", t.Path, err)
@@ -129,23 +143,23 @@ func main() {
 			}
 			links := reg.FindAllString(string(contentBytes), -1)
 			headAppended := false
-			for _, l := range links {
-				wg.Add(1)
-				go func(link string) {
-					defer wg.Done()
-					if s, e := DoPing(link); e != nil || s != http.StatusOK {
-						log.Printf("❌  [%d] %s\n", s, link)
-						if !headAppended {
-							errorsCol = append(errorsCol, "## "+t.Path)
-							headAppended = true
-						}
-						errorsCol = append(errorsCol, fmt.Sprintf("[%d] %s", s, link))
-					} else if verbose {
-						log.Printf("✔ [%d] %s\n", s, link)
+			for _, link := range links {
+				//wg.Add(1)
+				//go func(link string) {
+				//defer wg.Done()
+				if s, e := DoPing(link); e != nil || s != http.StatusOK {
+					log.Printf("❌  [%d] %s\n", s, link)
+					if !headAppended {
+						errorsCol = append(errorsCol, "## "+t.Path)
+						headAppended = true
 					}
-				}(l)
+					errorsCol = append(errorsCol, fmt.Sprintf("[%d] %s", s, link))
+				} else if verbose {
+					log.Printf("✔ [%d] %s\n", s, link)
+				}
+				//}(l)
 			}
-			wg.Wait()
+			//wg.Wait()
 			log.Printf("🔲 [%.2f%%] done for %s", float32(filesChecked)/float32(len(allMarkdown))*100, t.Path)
 
 		}
@@ -208,14 +222,14 @@ func DoRequest(link string) (string, error) {
 }
 
 func DoPing(link string) (int, error) {
-	req, err := http.NewRequest(http.MethodGet, link, nil)
+	req, err := http.NewRequest(http.MethodHead, link, nil)
 	if err != nil {
-		return 0, err
+		return -1, err
 	}
 	var resp *http.Response
 	resp, err = getHttpClient(proxy).Do(req)
 	if err != nil {
-		return 0, err
+		return -2, err
 	}
 	return resp.StatusCode, nil
 }
