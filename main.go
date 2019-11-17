@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -62,7 +63,6 @@ Usage:
 func main() {
 	var (
 		err          error
-		errorsCol    = make([]string, 0)
 		filesChecked int
 	)
 	flag.Parse()
@@ -70,7 +70,11 @@ func main() {
 		flag.Usage()
 		return
 	}
-
+	if output != "" {
+		if err = ioutil.WriteFile(output, make([]byte, 0), os.FileMode(os.O_CREATE|os.O_WRONLY)); err != nil {
+			log.Fatal(err)
+		}
+	}
 	linkReg, err := regexp.Compile(`github.com/.+/.+$`)
 	if err != nil {
 		log.Fatal(err)
@@ -117,6 +121,7 @@ func main() {
 	cachedURLs = make(map[string]int)
 
 	for _, t := range allMarkdown {
+		errorsCol := make([]string, 0)
 		rData, err := doRequest(t.Url)
 		if err != nil {
 			log.Printf("failed read %s: %v", t.Path, err)
@@ -143,7 +148,7 @@ func main() {
 				//go func(link string) {
 				//defer wg.Done()
 				if s, e := doPing(link); e != nil || s != http.StatusOK {
-					log.Printf("❌  [%d] %s\n", s, link)
+					log.Printf("❌  [%d] %s, %v\n", s, link, e)
 					if !headAppended {
 						errorsCol = append(errorsCol, "## "+t.Path)
 						headAppended = true
@@ -155,19 +160,34 @@ func main() {
 				//}(l)
 			}
 			//wg.Wait()
-			log.Printf("🔲 [%.2f%%] done for %s", float32(filesChecked)/float32(len(allMarkdown))*100, t.Path)
-
 		}
 		filesChecked++
-	}
-
-	if output != "" {
-		err = ioutil.WriteFile(output, []byte(strings.Join(errorsCol, "\r\n")), os.FileMode(os.O_CREATE|os.O_WRONLY))
-		if err != nil {
-			log.Fatal(err)
+		if len(errorsCol) > 0 {
+			err := saveToFile(output, errorsCol)
+			if err != nil {
+				log.Fatal(err)
+			}
 		}
-		log.Print("🏁 All broken links saved to ", output)
+		log.Printf("🔲 [%d/%d] done for %s", filesChecked, len(allMarkdown), t.Path)
 	}
+}
+
+func saveToFile(file string, data []string) error {
+	if file != "" {
+		f, err := os.OpenFile(file, os.O_WRONLY|os.O_APPEND, os.FileMode(0644))
+		if err != nil {
+			return err
+		}
+		n, err := f.Write([]byte("\r\n" + strings.Join(data, "\r\n") + "\r\n"))
+		if err == nil && n < len(data) {
+			err = io.ErrShortWrite
+		}
+		if err1 := f.Close(); err == nil {
+			err = err1
+		}
+		return err
+	}
+	return nil
 }
 
 func getHTTPClient(p string) *http.Client {
