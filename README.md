@@ -16,7 +16,7 @@ Usage:
         the branch of repository to check, default master (default "master")
   -h    help
   -l string
-        the user name of target repo path to check , for example 'github.com/docker/docker-ce'
+        the link of target repo path to check , for example 'github.com/docker/docker-ce'
   -o string
         write result to file
   -p string
