@@ -2,7 +2,7 @@
 
 ## 使用说明
 
-```shell script
+```
 $ ./dead-link-checker.exe
 
 Dead Link Checker
@@ -29,7 +29,7 @@ Usage:
 
 示例：
 
-```shell script
+```
 $ ./dead-link-checker.exe -b master -l github.com/ydcool/QrModule -au ydcool -ak c75c7ff10223322029b467945bc3bb07faaac0d0 -o errors.txt
 2019/11/01 00:32:14 🚀 start scan ...
 2019/11/01 00:32:14 🔗 136 files total in this repo...
