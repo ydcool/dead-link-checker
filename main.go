@@ -1,10 +1,5 @@
 /**
 ./dead-link-checker.exe -v -b master -l github.com/ydcool/QrModule -au ydcool -ak c75c7ff10223322029b467945bc3bb07faaac0d0 -p http://127.0.0.1:3398 -o brokenlinks.txt
-
-TODO
- 链接缓存，去重
- 0
- 请求降频
 */
 
 package main
@@ -14,7 +9,6 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"git.inspur.com/yindongchao/dead-link-checker/pkg"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -23,9 +17,12 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"git.inspur.com/yindongchao/dead-link-checker/pkg"
 )
 
-const HttpReg = `((http|ftp|https)://)(([a-zA-Z0-9\._-]+\.[a-zA-Z]{2,6})|([0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}))(:[0-9]{1,4})*(/[a-zA-Z0-9\&%_\./-~-]*)?`
+//HTTPReg http regex
+const HTTPReg = `((http|ftp|https)://)(([a-zA-Z0-9\._-]+\.[a-zA-Z]{2,6})|([0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}))(:[0-9]{1,4})*(/[a-zA-Z0-9\&%_\./-~-]*)?`
 
 var (
 	help        bool
@@ -37,6 +34,8 @@ var (
 	output      string
 	verbose     bool
 	timeout     int
+
+	cachedURLs map[string]int
 )
 
 func init() {
@@ -45,7 +44,7 @@ Dead Link Checker
   Code with ❤  by Dominic
 Usage:
 `
-	flag.StringVar(&repo, "l", "", `the user name of target repo path to check , for example 'github.com/docker/docker-ce'`)
+	flag.StringVar(&repo, "l", "", `the link/address of target repo to check , for example 'github.com/docker/docker-ce'`)
 	flag.StringVar(&branch, "b", "master", "the branch of repository to check, default master")
 	flag.StringVar(&proxy, "p", "", `http/https proxy`)
 	flag.StringVar(&accessUser, "au", "", `access username for higher requests rate`)
@@ -61,12 +60,6 @@ Usage:
 }
 
 func main() {
-	//log.Print("start..")
-	////i, e := DoPing("https://dl.k8s.io/v1.10.13/kubernetes-client-darwin-386.tar.gz")
-	//i, e := DoPing("https://api.bintray.com/packages/ydcool/maven/QrModule/images/download.svg")
-	//log.Print(i, e)
-	//return
-
 	var (
 		err          error
 		errorsCol    = make([]string, 0)
@@ -93,7 +86,7 @@ func main() {
 	if verbose {
 		log.Println("🐞 start request api: ", api)
 	}
-	rData, err := DoRequest(api)
+	rData, err := doRequest(api)
 	if err != nil {
 		log.Fatalf("failed request api %s: %v", api, err)
 	}
@@ -108,7 +101,7 @@ func main() {
 	}
 	log.Printf("🔗 %d files total in this repo...\n", len(resultData.Tree))
 
-	reg, err := regexp.Compile(HttpReg)
+	reg, err := regexp.Compile(HTTPReg)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -121,8 +114,10 @@ func main() {
 	}
 	log.Printf("🔰 %d md total in this repo...\n", len(allMarkdown))
 
+	cachedURLs = make(map[string]int)
+
 	for _, t := range allMarkdown {
-		rData, err := DoRequest(t.Url)
+		rData, err := doRequest(t.Url)
 		if err != nil {
 			log.Printf("failed read %s: %v", t.Path, err)
 			continue
@@ -147,7 +142,7 @@ func main() {
 				//wg.Add(1)
 				//go func(link string) {
 				//defer wg.Done()
-				if s, e := DoPing(link); e != nil || s != http.StatusOK {
+				if s, e := doPing(link); e != nil || s != http.StatusOK {
 					log.Printf("❌  [%d] %s\n", s, link)
 					if !headAppended {
 						errorsCol = append(errorsCol, "## "+t.Path)
@@ -175,7 +170,7 @@ func main() {
 	}
 }
 
-func getHttpClient(p string) *http.Client {
+func getHTTPClient(p string) *http.Client {
 	if p != "" {
 		uRL := url.URL{}
 		urlProxy, _ := uRL.Parse(p)
@@ -192,7 +187,7 @@ func getHttpClient(p string) *http.Client {
 	}
 }
 
-func DoRequest(link string) (string, error) {
+func doRequest(link string) (string, error) {
 	req, err := http.NewRequest(http.MethodGet, link, nil)
 	if err != nil {
 		return "", err
@@ -210,7 +205,7 @@ func DoRequest(link string) (string, error) {
 			}
 		}
 	}()
-	resp, err = getHttpClient(proxy).Do(req)
+	resp, err = getHTTPClient(proxy).Do(req)
 	if err != nil {
 		return "", err
 	}
@@ -221,15 +216,24 @@ func DoRequest(link string) (string, error) {
 	return string(data), nil
 }
 
-func DoPing(link string) (int, error) {
+func doPing(link string) (int, error) {
+	if c, ok := cachedURLs[link]; ok {
+		if verbose {
+			log.Println("use cached url: ", c, link)
+		}
+		return c, nil
+	}
 	req, err := http.NewRequest(http.MethodHead, link, nil)
 	if err != nil {
+		cachedURLs[link] = -2
 		return -1, err
 	}
 	var resp *http.Response
-	resp, err = getHttpClient(proxy).Do(req)
+	resp, err = getHTTPClient(proxy).Do(req)
 	if err != nil {
+		cachedURLs[link] = -2
 		return -2, err
 	}
+	cachedURLs[link] = resp.StatusCode
 	return resp.StatusCode, nil
 }
