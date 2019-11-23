@@ -206,9 +206,6 @@ func (c *DeadLinkChecker) requestAPI(link string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer func() {
-		_ = resp.Body.Close()
-	}()
 	data, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		return "", err
