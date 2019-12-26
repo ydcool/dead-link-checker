@@ -144,7 +144,7 @@ func (c *DeadLinkChecker) CheckBrokenLink(files []Tree) {
 			continue
 		}
 		if blob.Encoding == "base64" {
-			log.Printf("🕑 start scan %s...\n", t.Path)
+			//log.Printf("🕑 start scan %s...\n", t.Path)
 			//wg := sync.WaitGroup{}
 			contentBytes, err := base64.StdEncoding.DecodeString(blob.Content)
 			if err != nil {
